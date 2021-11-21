@@ -1,8 +1,6 @@
-use reqwest::IntoUrl;
+use crate::utils;
 use reqwest::Url;
 use serde_json::Value;
-use std::fs::File;
-use std::io::Write;
 
 #[derive(Default, Debug)]
 pub struct Post {
@@ -18,7 +16,7 @@ pub struct Post {
 }
 
 #[derive(Debug)]
-enum VideoPlatform {
+pub enum VideoPlatform {
     Imgur,
     RedGifs,
     Unknown,
@@ -35,22 +33,12 @@ impl Post {
         if self.is_image {
             let url = Url::parse(self.dest_url.as_str())?;
             let name = format!("{}.png", &self.id);
-            download_file_from_url(url, &name).await?;
+            utils::download_file_from_url(Some(url), &name).await?;
         }
         if self.is_gif {
-            match self.video_platform {
-                VideoPlatform::Imgur => {}
-                VideoPlatform::RedGifs => {
-                    let url = fetch_download_url_from_redgifs(&self.dest_url)
-                        .await?
-                        .unwrap();
-                    let name = format!("{}.mp4", &self.id);
-                    download_file_from_url(url, &name).await?;
-                }
-                VideoPlatform::Unknown => {
-                    println!("Cannot download the GIF")
-                }
-            }
+            let url = fetch_download_url(&self.dest_url, &self.video_platform).await?;
+            let name = format!("{}.mp4", &self.id);
+            utils::download_file_from_url(url, &name).await?;
         }
         Ok(())
     }
@@ -100,7 +88,7 @@ pub async fn fetch_latest_posts(username: &str) -> Result<Vec<Post>, Box<dyn std
     Ok(fetch_posts_from_value(serde_json::from_str(&resp)?).await?)
 }
 
-pub async fn fetched_posts_from_after(
+pub async fn fetch_posts_from_after(
     username: String,
     after: String,
 ) -> Result<Vec<Post>, Box<dyn std::error::Error>> {
@@ -149,39 +137,33 @@ fn find_video_platform(link: &str) -> VideoPlatform {
     VideoPlatform::Unknown
 }
 
-pub async fn download_file_from_url<T>(url: T, name: &str) -> Result<(), Box<dyn std::error::Error>>
-where
-    T: IntoUrl,
-{
-    println!("Download started!");
-    let mut resp = reqwest::get(url).await?;
-    resp.content_length();
-    let mut f = File::create(name)?;
-    while let Some(chunk) = resp.chunk().await? {
-        f.write_all(&chunk[..])?;
-    }
-    println!("Download completed!");
-    Ok(())
-}
-
-pub async fn fetch_download_url_from_redgifs(
+pub async fn fetch_download_url(
     dest_url: &str,
+    provider: &VideoPlatform,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let url = dest_url
-        .replace(
-            "https://redgifs.com/watch",
-            "https://api.redgifs.com/v1/gfycats",
-        )
-        .replace('"', "");
-    let client = reqwest::Client::builder()
+    match provider {
+        VideoPlatform::Imgur => {
+            todo!()
+        }
+        VideoPlatform::RedGifs => {
+            let url = dest_url
+                .replace(
+                    "https://redgifs.com/watch",
+                    "https://api.redgifs.com/v1/gfycats",
+                )
+                .replace('"', "");
+            let client = reqwest::Client::builder()
         .user_agent(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:90.0) Gecko/20100101 Firefox/90.0",
         )
         .build()?;
-    let resp = client.get(url).send().await?.text().await?;
-    let value: Value = serde_json::from_str(&resp)?;
-    let final_url = value["gfyItem"]["content_urls"]["mp4"]["url"]
-        .to_string()
-        .replace('"', "");
-    Ok(Some(final_url))
+            let resp = client.get(url).send().await?.text().await?;
+            let value: Value = serde_json::from_str(&resp)?;
+            let final_url = value["gfyItem"]["content_urls"]["mp4"]["url"]
+                .to_string()
+                .replace('"', "");
+            Ok(Some(final_url))
+        }
+        VideoPlatform::Unknown => todo!(),
+    }
 }
